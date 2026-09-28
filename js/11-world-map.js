@@ -594,12 +594,18 @@ if (typeof document !== 'undefined' && document.addEventListener) {
 
 // 🔧 村莊「出發」按鈕：一鍵回到上一張戰鬥地圖。軍王之室需鑰匙，無鑰匙顯示鑰匙不足。
 function departToLastBattle() {
-    if (player.statuses && (player.statuses.stone > 0 || player.statuses.paralyze > 0 || player.statuses.freeze > 0 || player.statuses.stun > 0 || player.statuses.sleep > 0)) {
-        logSys('你目前無法行動（石化／麻痺／冰凍／暈眩），無法出發。');
-        return;
-    }
-    if (isHiddenArea(player.lastBattleMap)) { enterHiddenArea(player.lastBattleMap); return; }   // 🏛️ 上一張為隱藏狩獵區域→直接 force 重進（繞過選單可選性檢查）
-    let tgt = player.lastBattleMap;
+    // 🔧 v3.8.34-100mod：修正 Windows 本機版「出發」偶爾無反應。
+    //    原因之一是 setMapSelectors() 重新建構分類/地圖選單後，某些舊存檔的 lastBattleMap
+    //    可能沒有被目前的地區清單選中，導致 <select>.value 變成空字串，後續 changeMap() 便無法取得目標。
+    //    這裡先把目標解析、確認可用，再強制把目標 option 補回 select，最後沿用正常 changeMap() 流程。
+    try {
+        if (!player || !mapState || typeof document === 'undefined') return;
+        if (player.statuses && (player.statuses.stone > 0 || player.statuses.paralyze > 0 || player.statuses.freeze > 0 || player.statuses.stun > 0 || player.statuses.sleep > 0)) {
+            logSys('你目前無法行動（石化／麻痺／冰凍／暈眩），無法出發。');
+            return;
+        }
+        if (isHiddenArea(player.lastBattleMap)) { enterHiddenArea(player.lastBattleMap); return; }   // 🏛️ 上一張為隱藏狩獵區域→直接 force 重進（繞過選單可選性檢查）
+        let tgt = player.lastBattleMap;
     if (tgt === 'rift_battle') { logSys('<span class="text-violet-300">扭曲的時空已經崩塌消失，沒有可以出發的地圖。</span>'); return; }   // 🌀 裂痕已崩塌：不可用「出發」重進，須在入口以龜裂之核重新進入
     // 🔧 攻城結束後，上一張戰鬥地圖若為攻城區（外門/內城）：強制改往新手修練場，避免重新進入已結束的攻城區
     if (tgt && SIEGE_OUTER_INNER.includes(tgt) && !(player.siege && player.siege.active)) {
@@ -637,13 +643,33 @@ function departToLastBattle() {
             return;
         }
     }
-    setMapSelectors(tgt);
-    if (document.getElementById('map-select').value !== tgt) {   // 目標目前不可前往（如攻城已結束、地圖未開放）
-        syncMapSelectors();
-        logSys('<span class="text-slate-400">上一張戰鬥地圖目前無法前往。</span>');
-        return;
+        // 先同步選單。若目前版本的地區清單沒有列出舊存檔目標，補一個臨時 option，
+        // 讓 changeMap() 可以正常接手，而不是靜默地把 value 變成空字串。
+        setMapSelectors(tgt);
+        const _sel = document.getElementById('map-select');
+        if (!_sel) { logSys('<span class="text-red-400">地圖選單尚未載入，請稍後再試。</span>'); return; }
+        if (_sel.value !== tgt) {
+            let _name = (DB.maps && DB.maps[tgt] && (DB.maps[tgt].n || DB.maps[tgt].name)) || tgt;
+            let _opt = Array.from(_sel.options).find(o => o.value === tgt);
+            if (!_opt) {
+                _opt = document.createElement('option');
+                _opt.value = tgt;
+                _opt.textContent = _name;
+                _sel.appendChild(_opt);
+            }
+            _sel.value = tgt;
+        }
+        if (_sel.value !== tgt) {
+            syncMapSelectors();
+            logSys('<span class="text-slate-400">上一張戰鬥地圖目前無法前往。</span>');
+            return;
+        }
+        // 走既有正常切換流程（權限、鑰匙、卷軸等仍由 changeMap() 驗證）。
+        changeMap();
+    } catch (e) {
+        console.error('[出發] departToLastBattle failed:', e);
+        try { logSys('<span class="text-red-400">出發失敗：' + (e && e.message ? e.message : e) + '</span>'); } catch (_) {}
     }
-    changeMap();   // 走既有切換流程（軍王之室在此消耗 1 把鑰匙）
 }
 
 // ===== 攻城戰 =====
